@@ -529,90 +529,96 @@ class Application:
     def trigger_heuristique_and_go_to_page6(self, donnees_ors):
         # Pass input_ors_data directly to the heuristic
         scheduling_results_formatted, or_completion_times, final_machines_state, makespan = self.run_construction_heuristic(donnees_ors)
+        # Marquer que c'est l'heuristique
+        self.is_genetic_result = False
         # Pass all relevant data to page6
         self.page6(scheduling_results_formatted, or_completion_times, final_machines_state, donnees_ors, makespan)
-    
+        
 
     def trigger_genetique_and_go_to_page6(self, donnees_ors):
         try:
             print("Algorithme génétique lancé !")
-            # ... tout le code de la méthode ...
+            # 1. Conversion des données de l'interface au format attendu par l'algorithme génétique
+            taches_template = [
+                {"nom": "Demontage", "machine": None},
+                {"nom": "Usinage", "machine": "Usinage"},
+                {"nom": "Culasse", "machine": "Culasse"},
+                {"nom": "Injection", "machine": "Injection"},
+                {"nom": "Essai", "machine": None},
+                {"nom": "Peinture", "machine": "Peinture"},
+                {"nom": "Confection", "machine": None},
+                {"nom": "Montage", "machine": None},
+                {"nom": "Controle", "machine": "BEM"}
+            ]
+            processed_ors = []
+            for i, or_data in enumerate(donnees_ors):
+                try:
+                    from datetime import datetime
+                    date_limite_dt = datetime.strptime(or_data["date_limite"], "%d/%m/%Y")
+                    delai = date_limite_dt.toordinal()
+                except Exception:
+                    delai = float('inf')
+                taches = []
+                for j, tache_template in enumerate(taches_template):
+                    duree = or_data["durees"][j] if j < len(or_data["durees"]) else 0.0
+                    taches.append({
+                        "nom": tache_template["nom"],
+                        "duree": duree,
+                        "machine": tache_template["machine"]
+                    })
+                processed_ors.append({
+                    "nom": or_data.get("nom", f"OR{i+1}"),
+                    "delai": delai,
+                    "poids": 1,
+                    "taches": taches
+                })
+
+            # 2. Définir le template des machines
+            machines_template = {
+                "Usinage": [{"nom": "M1-Usinage", "libre": 0}, {"nom": "M2-Usinage", "libre": 0}],
+                "Culasse": [{"nom": "M1-Culasse", "libre": 0}, {"nom": "M2-Culasse", "libre": 0}],
+                "Injection": [{"nom": "M1-Inj", "libre": 0}, {"nom": "M2-Inj", "libre": 0}],
+                "BEM": [{"nom": "M1-BEM", "libre": 0}, {"nom": "M2-BEM", "libre": 0}],
+                "Peinture": [{"nom": "M1-Peinture", "libre": 0}, {"nom": "M2-Peinture", "libre": 0}]
+            }
+
+            # 3. Lancer l'algorithme génétique
+            ga = GeneticAlgorithmORs(
+                ORs_data=processed_ors,
+                machines_template=machines_template,
+                alpha=0.5,
+                pop_size=30,
+                generations=100,
+                elitism_rate=0.1,
+                crossover_prob=0.8,
+                mutation_prob=0.15,
+                max_k_mutations=2,
+                max_stagnation_generations=30,
+                epsilon_stagnation=0.01
+            )
+            meilleure_sequence_ors, meilleur_makespan = ga.run()
+
+            # 4. Générer l'ordonnancement détaillé pour affichage
+            _, ordonnancement_detail = evaluer_sequence(meilleure_sequence_ors, machines_template)
+
+            # 5. Formater les résultats pour affichage dans page6
+            scheduling_results_formatted = []
+            for item in ordonnancement_detail:
+                machine_info = f" ({item['Machine']})" if item["Machine"] else ""
+                scheduling_results_formatted.append(
+                    f"{item['OR']}-{item['Tache']}{machine_info}: {int(item['Debut'])}->{int(item['Fin'])}"
+                )
+            or_completion_times = {item['OR']: item['Fin'] for item in ordonnancement_detail if item['Tache'] == 'Controle'}
+            final_machines_state = None
+            
+            # Marquer que c'est l'algorithme génétique
+            self.is_genetic_result = True
+            # Aller à page6
+            self.page6(scheduling_results_formatted, or_completion_times, final_machines_state, donnees_ors, meilleur_makespan)
+            
         except Exception as e:
             import traceback
             messagebox.showerror("Erreur", f"Erreur dans l'algorithme génétique :\n{e}\n\n{traceback.format_exc()}")
-        # 1. Conversion des données de l'interface au format attendu par l'algorithme génétique
-        taches_template = [
-            {"nom": "Demontage", "machine": None},
-            {"nom": "Usinage", "machine": "Usinage"},
-            {"nom": "Culasse", "machine": "Culasse"},
-            {"nom": "Injection", "machine": "Injection"},
-            {"nom": "Essai", "machine": None},
-            {"nom": "Peinture", "machine": "Peinture"},
-            {"nom": "Confection", "machine": None},
-            {"nom": "Montage", "machine": None},
-            {"nom": "Controle", "machine": "BEM"}
-        ]
-        processed_ors = []
-        for i, or_data in enumerate(donnees_ors):
-            try:
-                from datetime import datetime
-                date_limite_dt = datetime.strptime(or_data["date_limite"], "%d/%m/%Y")
-                delai = date_limite_dt.toordinal()
-            except Exception:
-                delai = float('inf')
-            taches = []
-            for j, tache_template in enumerate(taches_template):
-                duree = or_data["durees"][j] if j < len(or_data["durees"]) else 0.0
-                taches.append({
-                    "nom": tache_template["nom"],
-                    "duree": duree,
-                    "machine": tache_template["machine"]
-                })
-            processed_ors.append({
-                "nom": or_data.get("nom", f"OR{i+1}"),
-                "delai": delai,
-                "poids": 1,
-                "taches": taches
-            })
-
-        # 2. Définir le template des machines
-        machines_template = {
-            "Usinage": [{"nom": "M1-Usinage", "libre": 0}, {"nom": "M2-Usinage", "libre": 0}],
-            "Culasse": [{"nom": "M1-Culasse", "libre": 0}, {"nom": "M2-Culasse", "libre": 0}],
-            "Injection": [{"nom": "M1-Inj", "libre": 0}, {"nom": "M2-Inj", "libre": 0}],
-            "BEM": [{"nom": "M1-BEM", "libre": 0}, {"nom": "M2-BEM", "libre": 0}],
-            "Peinture": [{"nom": "M1-Peinture", "libre": 0}, {"nom": "M2-Peinture", "libre": 0}]
-        }
-
-        # 3. Lancer l'algorithme génétique
-        ga = GeneticAlgorithmORs(
-            ORs_data=processed_ors,
-            machines_template=machines_template,
-            alpha=0.5,
-            pop_size=30,
-            generations=100,
-            elitism_rate=0.1,
-            crossover_prob=0.8,
-            mutation_prob=0.15,
-            max_k_mutations=2,
-            max_stagnation_generations=30,
-            epsilon_stagnation=0.01
-        )
-        meilleure_sequence_ors, meilleur_makespan = ga.run()
-
-        # 4. Générer l'ordonnancement détaillé pour affichage
-        _, ordonnancement_detail = evaluer_sequence(meilleure_sequence_ors, machines_template)
-
-        # 5. Formater les résultats pour affichage dans page6
-        scheduling_results_formatted = []
-        for item in ordonnancement_detail:
-            machine_info = f" ({item['Machine']})" if item["Machine"] else ""
-            scheduling_results_formatted.append(
-                f"{item['OR']}-{item['Tache']}{machine_info}: {int(item['Debut'])}->{int(item['Fin'])}"
-            )
-        or_completion_times = {item['OR']: item['Fin'] for item in ordonnancement_detail if item['Tache'] == 'Controle'}
-        final_machines_state = None  # Optionnel, tu peux le calculer si tu veux
-        self.page6(scheduling_results_formatted, or_completion_times, final_machines_state, donnees_ors, meilleur_makespan)
 
 
     def run_construction_heuristic(self, input_ors_data):
@@ -942,23 +948,30 @@ class Application:
         # Update current_y_position for buttons below the Treeview
         current_y_position = tree_frame_y + tree_frame_height / 2 + 50
 
-       
-        # Boutons modifiés - remplacer la section boutons existante par :
+        # Boutons - VERSION CORRIGÉE
         btn_style_common = {"font": ("Arial", 12, "bold"), "width": 20, "fg": "white"}
-       
+
         btn_retour_page5 = tk.Button(self.root, text="Retour",
-                                     command=lambda: self.page5(donnees_ors_for_back),
-                                     bg="#6C757D", **btn_style_common)
+                                    command=lambda: self.page5(donnees_ors_for_back),
+                                    bg="#6C757D", **btn_style_common)
         self.canvas.create_window(x0 + frame_width / 2 - 250, current_y_position, window=btn_retour_page5)
 
-        # Bouton améliorer modifié pour aller vers page7
-        btn_ameliorer = tk.Button(self.root, text="Améliorer la solution",
-                                 command=lambda: self.page7(donnees_ors_for_back, makespan_value),
-                                 bg="#28A745", **btn_style_common)
-        self.canvas.create_window(x0 + frame_width / 2, current_y_position, window=btn_ameliorer)
+        # Bouton améliorer (seulement pour l'heuristique)
+        if hasattr(self, 'is_genetic_result') and not self.is_genetic_result:
+            btn_ameliorer = tk.Button(self.root, text="Améliorer la solution",
+                                    command=lambda: self.page7(donnees_ors_for_back, makespan_value),
+                                    bg="#28A745", **btn_style_common)
+            self.canvas.create_window(x0 + frame_width / 2 - 50, current_y_position, window=btn_ameliorer)
+
+        # Bouton Gantt (pour tous les résultats)
+        btn_gantt = tk.Button(self.root, text="Diagramme de Gantt",
+                            command=lambda: self.afficher_gantt_simple(scheduling_results, makespan_value),
+                            bg="#FF6B35", **btn_style_common)
+        gantt_x_pos = x0 + frame_width / 2 + 100 if (hasattr(self, 'is_genetic_result') and not self.is_genetic_result) else x0 + frame_width / 2
+        self.canvas.create_window(gantt_x_pos, current_y_position, window=btn_gantt)
 
         btn_quitter = tk.Button(self.root, text="Quitter", command=self.quitter,
-                               bg="#DC3545", **btn_style_common)
+                            bg="#DC3545", **btn_style_common)
         self.canvas.create_window(x0 + frame_width / 2 + 250, current_y_position, window=btn_quitter)
 
     def page7(self, donnees_ors_original, makespan_initial):
@@ -1019,6 +1032,124 @@ class Application:
         btn_quitter_page7 = tk.Button(self.root, text="Quitter", command=self.quitter,
                                         bg="#DC3545", **btn_style_common)
         self.btn_quitter_page7_widget_p7 = self.canvas.create_window(x0 + frame_width / 2 + 150, button_y_position, window=btn_quitter_page7)
+
+
+    def afficher_gantt_simple(self, scheduling_results, makespan_value):
+        """Affiche le diagramme de Gantt dans une nouvelle fenêtre"""
+        try:
+            # Créer une nouvelle fenêtre
+            gantt_window = tk.Toplevel(self.root)
+            gantt_window.title("Diagramme de Gantt")
+            gantt_window.geometry("1000x700")
+            
+            # Importer matplotlib
+            import matplotlib.pyplot as plt
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            import random
+            
+            # Convertir les données pour le graphique
+            donnees_gantt = []
+            for line in scheduling_results:
+                # Exemple de line: "OR1-Demontage (Manuel): 0->2"
+                if ':' not in line:
+                    continue
+                    
+                partie_gauche = line.split(':')[0]  # "OR1-Demontage (Manuel)"
+                partie_droite = line.split(':')[1]  # " 0->2"
+                
+                # Extraire OR et Tâche
+                if '-' in partie_gauche:
+                    or_name = partie_gauche.split('-')[0]  # "OR1"
+                    reste = partie_gauche.split('-')[1]    # "Demontage (Manuel)"
+                    
+                    if '(' in reste:
+                        task_name = reste.split('(')[0].strip()  # "Demontage"
+                        machine = reste.split('(')[1].replace(')', '').strip()  # "Manuel"
+                    else:
+                        task_name = reste.strip()
+                        machine = "Manuel"
+                else:
+                    continue
+                
+                # Extraire début et fin
+                if '->' in partie_droite:
+                    debut_str = partie_droite.split('->')[0].strip()
+                    fin_str = partie_droite.split('->')[1].strip()
+                    try:
+                        debut = int(float(debut_str))
+                        fin = int(float(fin_str))
+                    except:
+                        continue
+                else:
+                    continue
+                
+                donnees_gantt.append({
+                    'OR': or_name,
+                    'Tache': task_name,
+                    'Machine': machine,
+                    'Debut': debut,
+                    'Fin': fin
+                })
+            
+            # Créer le graphique
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            # Obtenir la liste des ORs uniques
+            ors_uniques = []
+            for item in donnees_gantt:
+                if item['OR'] not in ors_uniques:
+                    ors_uniques.append(item['OR'])
+            
+            # Couleurs pour les tâches
+            taches_uniques = []
+            for item in donnees_gantt:
+                if item['Tache'] not in taches_uniques:
+                    taches_uniques.append(item['Tache'])
+            
+            couleurs = {}
+            random.seed(42)
+            for tache in taches_uniques:
+                couleurs[tache] = (random.random(), random.random(), random.random())
+            
+            # Dessiner les barres
+            for item in donnees_gantt:
+                y_position = ors_uniques.index(item['OR'])
+                duree = item['Fin'] - item['Debut']
+                couleur = couleurs[item['Tache']]
+                
+                # Dessiner la barre
+                ax.barh(y_position, duree, left=item['Debut'], height=0.5, 
+                    color=couleur, edgecolor='black')
+                
+                # Ajouter le texte
+                ax.text(item['Debut'] + duree/2, y_position, 
+                    f"{item['Tache']}", 
+                    ha='center', va='center', fontsize=9, weight='bold')
+            
+            # Configuration du graphique
+            ax.set_yticks(range(len(ors_uniques)))
+            ax.set_yticklabels(ors_uniques)
+            ax.set_xlabel('Temps (heures)')
+            ax.set_ylabel('Ordres de Réparation')
+            
+            # Titre différent selon la méthode
+            method_name = "Algorithme Génétique" if hasattr(self, 'is_genetic_result') and self.is_genetic_result else "Heuristique de Construction"
+            ax.set_title(f'Diagramme de Gantt - {method_name}\nMakespan: {int(makespan_value)} heures')
+            ax.grid(axis='x', alpha=0.3)
+            
+            # Intégrer dans Tkinter
+            canvas = FigureCanvasTkAgg(fig, gantt_window)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            # Bouton fermer
+            btn_fermer = tk.Button(gantt_window, text="Fermer", 
+                                command=gantt_window.destroy,
+                                bg="#DC3545", fg="white", font=("Arial", 12))
+            btn_fermer.pack(pady=10)
+            
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Erreur affichage Gantt: {e}")
 
     def convert_donnees_to_algorithm_format(self, donnees_ors):
         """Convertit les données de l'interface vers le format de l'algorithme d'amélioration"""
