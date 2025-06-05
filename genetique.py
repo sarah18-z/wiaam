@@ -4,6 +4,8 @@ import itertools
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import math
+from openpyxl import load_workbook
+from datetime import datetime
 
 # --- Données machines (Complétées) ---
 machines_template = {
@@ -14,9 +16,138 @@ machines_template = {
     "Peinture": [{"nom": "M1-Peinture", "libre": 0}, {"nom": "M2-Peinture", "libre": 0}]
 }
 
-# --- Données ORs (Complétées) ---
-# Note: J'ai ajouté des poids 'poids' par défaut à 1 pour chaque OR.
-# Ce poids est utilisé dans la fonction de fitness pour les retards pondérés (Wj * Tj).
+# --- Fonction pour charger les données depuis Excel ---
+def charger_donnees_excel(fichier_excel):
+    """
+    Charge les données des ORs depuis un fichier Excel.
+    Format attendu: OR Name, Due Date, Task1_Duration, ..., Task9_Duration
+    """
+    try:
+        wb = load_workbook(filename=fichier_excel)
+        ws = wb.active
+        ors_data = []
+        
+        # Template des tâches dans l'ordre correct
+        taches_template = [
+            {"nom": "Demontage", "machine": None},
+            {"nom": "Usinage", "machine": "Usinage"},
+            {"nom": "Preparation", "machine": None},
+            {"nom": "Culasse", "machine": "Culasse"},
+            {"nom": "Injection", "machine": "Injection"},
+            {"nom": "Sous-Organe", "machine": None},
+            {"nom": "Montage", "machine": None},
+            {"nom": "BEM", "machine": "BEM"},
+            {"nom": "Peinture", "machine": "Peinture"},
+        ]
+        
+        # Lire les données ligne par ligne (en sautant l'en-tête)
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row[0]:  # Arrêter si le nom de l'OR est vide
+                break
+                
+            or_name = str(row[0])  # Nom de l'OR
+            
+            # Traitement de la date limite
+            date_limite = row[1]
+            if isinstance(date_limite, datetime):
+                delai = date_limite.toordinal()
+            elif isinstance(date_limite, str):
+                try:
+                    date_limite_dt = datetime.strptime(date_limite, "%d/%m/%Y")
+                    delai = date_limite_dt.toordinal()
+                except ValueError:
+                    delai = float('inf')
+            else:
+                delai = float('inf')
+            
+            # Traitement des durées des tâches
+            taches_or = []
+            for j, tache_template in enumerate(taches_template):
+                # Les durées commencent à la colonne 3 (index 2)
+                duree_val = row[2 + j] if (2 + j) < len(row) else 0
+                try:
+                    duree = float(duree_val) if duree_val is not None else 0.0
+                except (ValueError, TypeError):
+                    duree = 0.0
+                
+                taches_or.append({
+                    "nom": tache_template["nom"],
+                    "duree": duree,
+                    "machine": tache_template["machine"]
+                })
+            
+            # Créer l'objet OR
+            or_data = {
+                "nom": or_name,
+                "delai": delai,
+                "poids": 1,  # Poids par défaut
+                "taches": taches_or
+            }
+            ors_data.append(or_data)
+        
+        wb.close()
+        return ors_data
+        
+    except Exception as e:
+        print(f"Erreur lors du chargement du fichier Excel: {e}")
+        return []
+
+def charger_donnees_depuis_interface(donnees_interface):
+    """
+    Convertit les données de l'interface vers le format de l'algorithme génétique.
+    """
+    # Template des tâches dans l'ordre correct
+    taches_template = [
+        {"nom": "Demontage", "machine": None},
+        {"nom": "Usinage", "machine": "Usinage"},
+        {"nom": "Preparation", "machine": None},
+        {"nom": "Culasse", "machine": "Culasse"},
+        {"nom": "Injection", "machine": "Injection"},
+        {"nom": "Sous-Organe", "machine": None},
+        {"nom": "Montage", "machine": None},
+        {"nom": "BEM", "machine": "BEM"},
+        {"nom": "Peinture", "machine": "Peinture"},
+    ]
+    
+    ors_data = []
+    for or_data_interface in donnees_interface:
+        try:
+            # Traitement de la date limite
+            date_limite_str = or_data_interface["date_limite"]
+            try:
+                date_limite_dt = datetime.strptime(date_limite_str, "%d/%m/%Y")
+                delai = date_limite_dt.toordinal()
+            except ValueError:
+                delai = float('inf')
+            
+            # Traitement des tâches
+            taches_or = []
+            durees = or_data_interface["durees"]
+            
+            for j, tache_template in enumerate(taches_template):
+                duree = durees[j] if j < len(durees) else 0.0
+                taches_or.append({
+                    "nom": tache_template["nom"],
+                    "duree": duree,
+                    "machine": tache_template["machine"]
+                })
+            
+            # Créer l'objet OR
+            or_data = {
+                "nom": or_data_interface.get("nom", f"OR{len(ors_data)+1}"),
+                "delai": delai,
+                "poids": 1,  # Poids par défaut
+                "taches": taches_or
+            }
+            ors_data.append(or_data)
+            
+        except Exception as e:
+            print(f"Erreur lors de la conversion des données pour {or_data_interface.get('nom', 'OR inconnu')}: {e}")
+            continue
+    
+    return ors_data
+
+# --- Données par défaut (pour les tests) ---
 ORs_data_full = [
     {
         "nom": "OR1", "delai": 20, "poids": 1,
@@ -43,48 +174,6 @@ ORs_data_full = [
             {"nom": "Sous-Organe", "duree": 1, "machine": None},
             {"nom": "Montage", "duree": 2, "machine": None},
             {"nom": "BEM", "duree": 3, "machine": "BEM"},
-            {"nom": "Peinture", "duree": 2, "machine": "Peinture"}
-        ]
-    },
-    {
-        "nom": "OR3", "delai": 22, "poids": 1,
-        "taches": [
-            {"nom": "Demontage", "duree": 3, "machine": None},
-            {"nom": "Usinage", "duree": 4, "machine": "Usinage"},
-            {"nom": "Preparation", "duree": 2, "machine": None},
-            {"nom": "Culasse", "duree": 4, "machine": "Culasse"},
-            {"nom": "Injection", "duree": 3, "machine": "Injection"},
-            {"nom": "Sous-Organe", "duree": 1, "machine": None},
-            {"nom": "Montage", "duree": 3, "machine": None},
-            {"nom": "BEM", "duree": 4, "machine": "BEM"},
-            {"nom": "Peinture", "duree": 3, "machine": "Peinture"}
-        ]
-    },
-    {
-        "nom": "OR4", "delai": 18, "poids": 1,
-        "taches": [
-            {"nom": "Demontage", "duree": 2, "machine": None},
-            {"nom": "Usinage", "duree": 3, "machine": "Usinage"},
-            {"nom": "Preparation", "duree": 1, "machine": None},
-            {"nom": "Culasse", "duree": 3, "machine": "Culasse"},
-            {"nom": "Injection", "duree": 2, "machine": "Injection"},
-            {"nom": "Sous-Organe", "duree": 1, "machine": None},
-            {"nom": "Montage", "duree": 2, "machine": None},
-            {"nom": "BEM", "duree": 3, "machine": "BEM"},
-            {"nom": "Peinture", "duree": 2, "machine": "Peinture"}
-        ]
-    },
-    {
-        "nom": "OR5", "delai": 25, "poids": 1,
-        "taches": [
-            {"nom": "Demontage", "duree": 1, "machine": None},
-            {"nom": "Usinage", "duree": 3, "machine": "Usinage"},
-            {"nom": "Preparation", "duree": 1, "machine": None},
-            {"nom": "Culasse", "duree": 2, "machine": "Culasse"},
-            {"nom": "Injection", "duree": 1, "machine": "Injection"},
-            {"nom": "Sous-Organe", "duree": 1, "machine": None},
-            {"nom": "Montage", "duree": 2, "machine": None},
-            {"nom": "BEM", "duree": 2, "machine": "BEM"},
             {"nom": "Peinture", "duree": 2, "machine": "Peinture"}
         ]
     }
@@ -491,20 +580,62 @@ class GeneticAlgorithmORs:
 
 # --- Exécution principale ---
 if __name__ == "__main__":
-    # ORs_data_full et machines_template sont définis plus haut
+    import tkinter as tk
+    from tkinter import filedialog, messagebox
+    
+    print("=== Algorithme Génétique pour l'Ordonnancement des ORs ===")
+    print("Choisissez le mode de chargement des données :")
+    print("1. Charger depuis un fichier Excel")
+    print("2. Utiliser les données par défaut (codées en dur)")
+    
+    choix = input("Votre choix (1 ou 2) : ").strip()
+    
+    if choix == "1":
+        # Sélection du fichier Excel
+        root = tk.Tk()
+        root.withdraw()  # Cacher la fenêtre principale
+        
+        fichier_excel = filedialog.askopenfilename(
+            title="Choisir un fichier Excel avec les données des ORs",
+            filetypes=[("Fichiers Excel", "*.xlsx *.xls")]
+        )
+        
+        if not fichier_excel:
+            print("Aucun fichier sélectionné. Utilisation des données par défaut.")
+            ORs_data_to_use = ORs_data_full  # Données par défaut
+        else:
+            print(f"Chargement des données depuis : {fichier_excel}")
+            ORs_data_to_use = charger_donnees_excel(fichier_excel)
+            
+            if not ORs_data_to_use:
+                print("Erreur lors du chargement. Utilisation des données par défaut.")
+                ORs_data_to_use = ORs_data_full
+            else:
+                print(f"✅ {len(ORs_data_to_use)} ORs chargés avec succès depuis Excel.")
+        
+        root.destroy()
+        
+    else:
+        print("Utilisation des données par défaut.")
+        ORs_data_to_use = ORs_data_full
+
+    # Affichage des ORs qui seront traités
+    print(f"\n--- ORs à traiter ({len(ORs_data_to_use)}) ---")
+    for or_item in ORs_data_to_use:
+        print(f"- {or_item['nom']} (Délai: {or_item['delai']})")
 
     # Création de l'instance de l'algorithme génétique
     ga = GeneticAlgorithmORs(
-        ORs_data=ORs_data_full, # Utilisation des données complètes
+        ORs_data=ORs_data_to_use,  # Utilisation des données chargées
         machines_template=machines_template,
         alpha=0.5,             # Poids Makespan vs Retards (0.0 à 1.0)
-        pop_size=50,
-        generations=200,
+        pop_size=30,           # Réduit pour des instances plus petites
+        generations=100,       # Réduit pour des tests plus rapides
         elitism_rate=0.1,      # Garde 10% des meilleurs individus sans modification
         crossover_prob=0.8,
         mutation_prob=0.15,    # Légèrement augmenté pour plus d'exploration
         max_k_mutations=2,
-        max_stagnation_generations=40, # Arrêt si pas d'amélioration significative pendant 40 générations
+        max_stagnation_generations=30, # Arrêt si pas d'amélioration significative
         epsilon_stagnation=0.01 # Seuil d'amélioration de fitness
     )
 
@@ -520,6 +651,6 @@ if __name__ == "__main__":
 
     # Affichage détaillé et diagramme de Gantt pour la meilleure solution
     _, ordonnancement_detail = evaluer_sequence(meilleure_sequence_ors, machines_template)
-   
+    
     afficher_ordonnancement(ordonnancement_detail)
     tracer_diagramme_gantt(ordonnancement_detail)
