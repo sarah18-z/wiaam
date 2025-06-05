@@ -3,6 +3,7 @@ import copy
 import itertools
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import math
 
 # --- Données machines (Complétées) ---
 machines_template = {
@@ -97,8 +98,8 @@ def calculer_makespan_et_retards(or_sequence_dict_list, machines_template_arg):
     Renvoie également le temps de fin de chaque OR pour le calcul des retards.
     """
     machines = copy.deepcopy(machines_template_arg)
-    temps_manuelles = {"Demontage": 0, "Preparation": 0, "Sous-Organe": 0, "Montage": 0}
-   
+    temps_manuelles = {"Demontage": 0, "Preparation": 0, "Sous-Organe": 0, "Montage": 0, 
+                    "Essai": 0, "Confection": 0, "Controle": 0}   
     makespan = 0
     retards_values = {} # {OR_nom: retard_valeur}
     OR_fin_times = {} # {OR_nom: temps_fin}
@@ -139,7 +140,8 @@ def evaluer_sequence(or_sequence_dict_list, machines_template_arg):
     Similaire à calculer_makespan_et_retards mais capture plus de détails.
     """
     machines = copy.deepcopy(machines_template_arg)
-    temps_manuelles = {"Demontage": 0, "Preparation": 0, "Sous-Organe": 0, "Montage": 0}
+    temps_manuelles = {"Demontage": 0, "Preparation": 0, "Sous-Organe": 0, "Montage": 0,
+                    "Essai": 0, "Confection": 0, "Controle": 0}
     makespan = 0
     ordonnancement_detail = []
    

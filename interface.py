@@ -6,6 +6,7 @@ from datetime import datetime
 import copy
 import itertools
 import random # Added for the random swaps in improvement heuristic
+from genetique import GeneticAlgorithmORs, evaluer_sequence
 
 # Import matplotlib components
 import matplotlib.pyplot as plt
@@ -510,9 +511,9 @@ class Application:
 
         # Bouton "Par algorithme génétique"
         btn_genetique = tk.Button(self.root,
-                                     text="Par algorithme génétique",
-                                     command=lambda: messagebox.showinfo("Algorithme Génétique", "Fonctionnalité à implémenter pour l'algorithme génétique."),
-                                     bg="#17a2b8", fg="white", font=("Arial", 14, "bold"), width=40)
+            text="Par algorithme génétique",
+            command=lambda: self.trigger_genetique_and_go_to_page6(donnees_ors),
+            bg="#17a2b8", fg="white", font=("Arial", 14, "bold"), width=40)
         self.canvas.create_window(self.screen_width // 2, y0 + 280, window=btn_genetique)
 
         # Bouton Retour
@@ -524,17 +525,94 @@ class Application:
         quit_btn = tk.Button(self.root, text="Quitter", command=self.quitter,
                                bg="#DC3545", fg="white", font=("Arial", 12, "bold"))
         self.canvas.create_window(x0 + frame_width - 100, y0 + frame_height - 50, window=quit_btn)
-
-
-
-
-
    
     def trigger_heuristique_and_go_to_page6(self, donnees_ors):
         # Pass input_ors_data directly to the heuristic
         scheduling_results_formatted, or_completion_times, final_machines_state, makespan = self.run_construction_heuristic(donnees_ors)
         # Pass all relevant data to page6
         self.page6(scheduling_results_formatted, or_completion_times, final_machines_state, donnees_ors, makespan)
+    
+
+    def trigger_genetique_and_go_to_page6(self, donnees_ors):
+        try:
+            print("Algorithme génétique lancé !")
+            # ... tout le code de la méthode ...
+        except Exception as e:
+            import traceback
+            messagebox.showerror("Erreur", f"Erreur dans l'algorithme génétique :\n{e}\n\n{traceback.format_exc()}")
+        # 1. Conversion des données de l'interface au format attendu par l'algorithme génétique
+        taches_template = [
+            {"nom": "Demontage", "machine": None},
+            {"nom": "Usinage", "machine": "Usinage"},
+            {"nom": "Culasse", "machine": "Culasse"},
+            {"nom": "Injection", "machine": "Injection"},
+            {"nom": "Essai", "machine": None},
+            {"nom": "Peinture", "machine": "Peinture"},
+            {"nom": "Confection", "machine": None},
+            {"nom": "Montage", "machine": None},
+            {"nom": "Controle", "machine": "BEM"}
+        ]
+        processed_ors = []
+        for i, or_data in enumerate(donnees_ors):
+            try:
+                from datetime import datetime
+                date_limite_dt = datetime.strptime(or_data["date_limite"], "%d/%m/%Y")
+                delai = date_limite_dt.toordinal()
+            except Exception:
+                delai = float('inf')
+            taches = []
+            for j, tache_template in enumerate(taches_template):
+                duree = or_data["durees"][j] if j < len(or_data["durees"]) else 0.0
+                taches.append({
+                    "nom": tache_template["nom"],
+                    "duree": duree,
+                    "machine": tache_template["machine"]
+                })
+            processed_ors.append({
+                "nom": or_data.get("nom", f"OR{i+1}"),
+                "delai": delai,
+                "poids": 1,
+                "taches": taches
+            })
+
+        # 2. Définir le template des machines
+        machines_template = {
+            "Usinage": [{"nom": "M1-Usinage", "libre": 0}, {"nom": "M2-Usinage", "libre": 0}],
+            "Culasse": [{"nom": "M1-Culasse", "libre": 0}, {"nom": "M2-Culasse", "libre": 0}],
+            "Injection": [{"nom": "M1-Inj", "libre": 0}, {"nom": "M2-Inj", "libre": 0}],
+            "BEM": [{"nom": "M1-BEM", "libre": 0}, {"nom": "M2-BEM", "libre": 0}],
+            "Peinture": [{"nom": "M1-Peinture", "libre": 0}, {"nom": "M2-Peinture", "libre": 0}]
+        }
+
+        # 3. Lancer l'algorithme génétique
+        ga = GeneticAlgorithmORs(
+            ORs_data=processed_ors,
+            machines_template=machines_template,
+            alpha=0.5,
+            pop_size=30,
+            generations=100,
+            elitism_rate=0.1,
+            crossover_prob=0.8,
+            mutation_prob=0.15,
+            max_k_mutations=2,
+            max_stagnation_generations=30,
+            epsilon_stagnation=0.01
+        )
+        meilleure_sequence_ors, meilleur_makespan = ga.run()
+
+        # 4. Générer l'ordonnancement détaillé pour affichage
+        _, ordonnancement_detail = evaluer_sequence(meilleure_sequence_ors, machines_template)
+
+        # 5. Formater les résultats pour affichage dans page6
+        scheduling_results_formatted = []
+        for item in ordonnancement_detail:
+            machine_info = f" ({item['Machine']})" if item["Machine"] else ""
+            scheduling_results_formatted.append(
+                f"{item['OR']}-{item['Tache']}{machine_info}: {int(item['Debut'])}->{int(item['Fin'])}"
+            )
+        or_completion_times = {item['OR']: item['Fin'] for item in ordonnancement_detail if item['Tache'] == 'Controle'}
+        final_machines_state = None  # Optionnel, tu peux le calculer si tu veux
+        self.page6(scheduling_results_formatted, or_completion_times, final_machines_state, donnees_ors, meilleur_makespan)
 
 
     def run_construction_heuristic(self, input_ors_data):
