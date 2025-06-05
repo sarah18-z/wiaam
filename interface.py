@@ -12,6 +12,8 @@ from genetique import GeneticAlgorithmORs, evaluer_sequence
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches # For legend patches in Gantt chart
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk # For embedding Gantt chart in Tkinter
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 
 class Application:
@@ -635,15 +637,14 @@ class Application:
         taches_heuristic_template_corrected = [
             {"nom": "Demontage", "machine": None},
             {"nom": "Usinage", "machine": "Usinage"},
+            {"nom": "Preparation", "machine": None},
             {"nom": "Culasse", "machine": "Culasse"},
             {"nom": "Injection", "machine": "Injection"},
-            {"nom": "Essai", "machine": None}, # Assuming 'Essai' is a manual task
-            {"nom": "Peinture", "machine": "Peinture"},
-            {"nom": "Confection", "machine": None},
+            {"nom": "Sous-Organe", "machine": None},
             {"nom": "Montage", "machine": None},
-            {"nom": "Controle", "machine": "BEM"}
+            {"nom": "BEM", "machine": "BEM"},
+            {"nom": "Peinture", "machine": "Peinture"},
         ]
-       
         # Convert Tkinter OR data to heuristic's OR format
         processed_ors = []
         for i, or_data_tk in enumerate(input_ors_data):
@@ -1151,21 +1152,134 @@ class Application:
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur affichage Gantt: {e}")
 
+    def tracer_diagramme_gantt(self, ordonnancement_detail):
+        """Trace le diagramme de Gantt horizontal avec la nouvelle API Matplotlib"""
+        ORs_unique = sorted(list(set(t['OR'] for t in ordonnancement_detail)))
+        taches_unique = sorted(list(set(t['Tache'] for t in ordonnancement_detail)))
+    
+        or_to_y = {or_name: i for i, or_name in enumerate(ORs_unique)}
+    
+        # Correction de l'avertissement de dépréciation
+        colormap = plt.colormaps.get_cmap('tab20')  # Nouvelle méthode recommandée
+        tache_to_color = {tache: colormap(i/len(taches_unique)) for i, tache in enumerate(taches_unique)}
+    
+        fig = Figure(figsize=(10, 6), dpi=100)  # Maintenant Figure est défini
+        ax = fig.add_subplot(111)
+    
+        for tache in ordonnancement_detail:
+            y_pos = or_to_y[tache['OR']]
+            debut = tache['Debut']
+            duree = tache['Fin'] - tache['Debut']
+        
+            ax.barh(y=y_pos, width=duree, left=debut,
+                color=tache_to_color[tache['Tache']],
+                height=0.6, edgecolor='black')
+        
+            if duree > 1:  # Seulement si la durée est suffisante
+                ax.text(debut + duree/2, y_pos, tache['Tache'],
+                    va='center', ha='center', fontsize=8)
+
+        ax.set_yticks(list(or_to_y.values()))
+        ax.set_yticklabels(list(or_to_y.keys()))
+        ax.set_xlabel('Temps (heures)')
+        ax.set_title('Diagramme de Gantt - Ordonnancement')
+        ax.grid(axis='x', linestyle='--', alpha=0.6)
+    
+        return fig
+
+    def page8(self, donnees_ors_original, makespan_initial):
+        """Page 8 - Diagramme de Gantt basé sur la solution optimisée"""
+        self.canvas.delete("all")
+
+        # Fond page 8
+        try:
+            bg_image = Image.open("ordonn.jpg").resize((self.screen_width, self.screen_height), Image.LANCZOS)
+            self.images['bg8'] = ImageTk.PhotoImage(bg_image)
+            self.canvas.create_image(0, 0, image=self.images['bg8'], anchor="nw")
+        except Exception as e:
+            print(f"Erreur chargement bg8: {e}. Using lightblue background.")
+            self.canvas.configure(bg="lightblue")
+
+        # Cadre principal
+        frame_width = 1000
+        frame_height = 700
+        x0 = (self.screen_width - frame_width) // 2
+        y0 = (self.screen_height - frame_height) // 2
+
+        try:
+            overlay = Image.new("RGBA", (frame_width, frame_height), (255, 255, 255, int(255 * 0.8)))
+            self.images['overlay8'] = ImageTk.PhotoImage(overlay)
+            self.canvas.create_image(x0, y0, image=self.images['overlay8'], anchor="nw")
+        except Exception as e:
+            print(f"Erreur chargement overlay: {e}. Using rectangle for overlay.")
+            self.canvas.create_rectangle(x0, y0, x0+frame_width, y0+frame_height,
+                                        fill="white", outline="black")
+
+        # Titre
+        self.canvas.create_text(self.screen_width // 2, y0 + 30,
+                                text="DIAGRAMME DE GANTT - SOLUTION OPTIMISÉE",
+                                font=("Georgia", 20, "bold italic"), fill="darkblue")
+
+        self.canvas.create_text(self.screen_width // 2, y0 + 60,
+                                text="Visualisation du planning des opérations",
+                                font=("Arial", 12, "italic"), fill="darkgreen")
+
+        try:
+            processed_ors = self.convert_donnees_to_algorithm_format(donnees_ors_original)
+            resultats = self.calculer_ameliorations(processed_ors, makespan_initial)
+        
+            if resultats.get('meilleure_solution'):
+                meilleure_sequence = [or_data for or_data in processed_ors
+                                    if or_data['nom'] in resultats['meilleure_solution']]
+                ordonnancement = self.calculer_ordonnancement_detaille(meilleure_sequence)
+            
+                # Cadre pour le diagramme
+                frame = ttk.Frame(self.root)
+                self.canvas.create_window(self.screen_width//2, self.screen_height//2,
+                                        window=frame, width=1000, height=600)
+            
+                # Création et affichage du diagramme
+                fig = self.tracer_diagramme_gantt(ordonnancement)
+                canvas = FigureCanvasTkAgg(fig, master=frame)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            else:
+                self.canvas.create_text(self.screen_width//2, self.screen_height//2,
+                                    text="Aucune solution optimisée disponible",
+                                    font=("Arial", 14))
+        except Exception as e:
+            self.canvas.create_text(self.screen_width//2, self.screen_height//2,
+                                text=f"Erreur: {str(e)}",
+                                font=("Arial", 14), fill="red")
+            # Boutons
+        btn_style_common = {"font": ("Arial", 12, "bold"), "width": 20, "fg": "white"}
+        button_y_position = y0 + frame_height - 30
+
+        # Create buttons using tk.Button and place them using create_window
+        btn_retour_page7 = tk.Button(self.root, text="Retour",
+                                    command=lambda: self.page7(donnees_ors_original, makespan_initial),
+                                    bg="#6C757D", **btn_style_common)
+        self.canvas.create_window(x0 + frame_width / 2 - 150, button_y_position, window=btn_retour_page7)
+
+        btn_quitter = tk.Button(self.root, text="Quitter", command=self.quitter,
+                                bg="#DC3545", **btn_style_common)
+        self.canvas.create_window(x0 + frame_width / 2 + 150, button_y_position, window=btn_quitter)
+        
     def convert_donnees_to_algorithm_format(self, donnees_ors):
         """Convertit les données de l'interface vers le format de l'algorithme d'amélioration"""
         # Template des tâches dans l'ordre correct
         taches_template = [
             {"nom": "Demontage", "machine": None},
             {"nom": "Usinage", "machine": "Usinage"},
+            {"nom": "Preparation", "machine": None},
             {"nom": "Culasse", "machine": "Culasse"},
             {"nom": "Injection", "machine": "Injection"},
-            {"nom": "Essai", "machine": None},
-            {"nom": "Peinture", "machine": "Peinture"},
-            {"nom": "Confection", "machine": None},
+            {"nom": "Sous-Organe", "machine": None},
             {"nom": "Montage", "machine": None},
-            {"nom": "Controle", "machine": "BEM"}
+            {"nom": "BEM", "machine": "BEM"},
+            {"nom": "Peinture", "machine": "Peinture"},
         ]
-       
         processed_ors = []
         for i, or_data in enumerate(donnees_ors):
             try:
